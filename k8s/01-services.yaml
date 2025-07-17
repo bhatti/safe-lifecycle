@@ -1,0 +1,43 @@
+# DEPLOYMENT WITHOUT PROPER LIFECYCLE MANAGEMENT (THE ANTI-PATTERN)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-service
+  namespace: lifecycle-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bad-service
+  template:
+    metadata:
+      labels:
+        app: bad-service
+    spec:
+      # Default grace period is 30s, but with no preStop hook or drain logic,
+      # the app will likely be killed before it's done.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: server
+          image: safe-lifecycle:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8085
+              name: grpc
+            - containerPort: 9090
+              name: http-mgmt
+          command: ["/app/server"]
+          args: ["-startup-delay=60s"] # Simulate a very slow start
+          # ANTI-PATTERN: Liveness and Readiness probes are identical and shallow.
+          # The liveness probe will fail and kill the container before the 60s startup delay finishes.
+          livenessProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8085"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3 # Will fail after ~35s
+          readinessProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8085"]
+            initialDelaySeconds: 5
+            periodSeconds: 10

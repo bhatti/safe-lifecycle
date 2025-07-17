@@ -1,0 +1,59 @@
+# DEPLOYMENT WITH RECOMMENDED LIFECYCLE MANAGEMENT
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: good-service
+  namespace: lifecycle-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: good-service
+  template:
+    metadata:
+      labels:
+        app: good-service
+      # GOOD PRACTICE: Istio annotations for ordered startup and shutdown.
+      # These annotations are KEY to solving the race conditions outlined in the proposal.
+      annotations:
+        sidecar.istio.io/holdApplicationUntilProxyStarts: "true"
+        proxy.istio.io/config: '{ "proxyMetadata": {"EXIT_ON_ZERO_ACTIVE_CONNECTIONS": "true"} }'
+        sidecar.istio.io/terminationDrainDuration: "30s"
+    spec:
+      # GOOD PRACTICE: Calculated grace period > preStop sleep + drain duration + buffer
+      # 15s (preStop) + 30s (istio drain) + 5s (buffer) = 50s
+      terminationGracePeriodSeconds: 50
+      containers:
+        - name: server
+          image: safe-lifecycle:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8085
+              name: grpc
+            - containerPort: 9090
+              name: http-mgmt
+          command: ["/app/server"]
+          args: ["-startup-delay=60s"] # Same slow start
+          # GOOD PRACTICE: preStop hook for LB drain delay before SIGTERM
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15; echo 'preStop hook finished'"]
+          # GOOD PRACTICE: Patient startup probe for slow-starting containers
+          startupProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8085", "-service=startup"]
+            # Allows up to 12 * 10s = 120s for startup, plenty for our 60s delay
+            failureThreshold: 12
+            periodSeconds: 10
+          # GOOD PRACTICE: Fast liveness probe to detect deadlocks after startup
+          livenessProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8085", "-service=liveness"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # GOOD PRACTICE: Readiness probe checks all dependencies
+          readinessProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8085", "-service=readiness"]
+            periodSeconds: 5

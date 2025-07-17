@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package demo;
+
+option go_package = "safe-lifecycle/api";
+
+service DemoService {
+  rpc DoWork(WorkRequest) returns (WorkResponse) {}
+}
+
+message WorkRequest {
+  string data = 1;
+}
+
+message WorkResponse {
+  string result = 1;
+}
